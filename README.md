@@ -1,10 +1,10 @@
-# anon_chat_core
+# el-anon-chat-core
 
 **Anonymous Chat Core C++ Qt Plugin** for **Logos Basecamp**, bridging the **E-Identity Stack** (`e_identity_sdk` and `e_moderation_sdk`) to the Basecamp QML frontend via C-ABI FFI.
 
 ## Architectural Overview
 
-`anon_chat_core` implements the `PluginInterface` and exposes `AnonChatInterface` to Basecamp, providing native cryptographic capabilities:
+`el-anon-chat-core` implements the `PluginInterface` and exposes `AnonChatInterface` to Basecamp, providing native cryptographic capabilities:
 
 1. **Identity Management**:
    - Random and deterministic Nullifier Secret Key (NSK) derivation.
@@ -34,7 +34,7 @@
 ## Directory Structure
 
 ```
-anon_chat_core/
+el-anon-chat-core/
 ├── CMakeLists.txt          # CMake plugin build script (logos_module)
 ├── metadata.json           # Basecamp core module manifest
 ├── flake.nix               # Nix packaging definition

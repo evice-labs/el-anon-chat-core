@@ -1,7 +1,10 @@
 # Anonymous Chat Core Module - wraps e_identity_sdk and e_moderation_sdk via FFI
 
 cmake_minimum_required(VERSION 3.14)
-project(AnonChatCorePlugin LANGUAGES CXX)
+project(ElAnonChatCorePlugin LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include the Logos Module CMake helper
 if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
@@ -12,13 +15,15 @@ else()
     message(FATAL_ERROR "LogosModule.cmake not found")
 endif()
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/metadata.json" METADATA_JSON)
+string(JSON MODULE_NAME GET ${METADATA_JSON} name)
+
 # Define the module with external libraries
 logos_module(
-    NAME anon_chat_core
+    NAME ${MODULE_NAME}
     SOURCES 
-        src/anon_chat_interface.h
-        src/anon_chat_plugin.h
-        src/anon_chat_plugin.cpp
+        src/el_anon_chat_core_impl.h
+        src/el_anon_chat_core_impl.cpp
     EXTERNAL_LIBS
         e_identity_sdk
         e_moderation_sdk

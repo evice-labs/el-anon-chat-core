@@ -1,16 +1,22 @@
 {
-  "name": "anon_chat_core",
+  "name": "el_anon_chat_core",
+  "display_name": "EL Anon Chat Core",
   "version": "1.0.0",
   "type": "core",
+  "interface": "universal",
   "category": "general",
   "description": "Anonymous chat core module wrapping e_identity_sdk and e_moderation_sdk via FFI",
-  "main": "anon_chat_core_plugin",
+  "main": "el_anon_chat_core_plugin",
+  "codegen": {
+    "impl_header": "src/el_anon_chat_core_impl.h",
+    "impl_class": "ElAnonChatCoreImpl"
+  },
   "dependencies": [],
 
   "nix": {
     "packages": {
-      "build": [],
-      "runtime": []
+      "build": ["nlohmann_json"],
+      "runtime": ["nlohmann_json"]
     },
     "external_libraries": [
       {
@@ -23,10 +29,10 @@
       }
     ],
     "cmake": {
-      "find_packages": [],
+      "find_packages": ["nlohmann_json"],
       "extra_sources": [],
       "extra_include_dirs": ["lib"],
-      "extra_link_libraries": ["e_identity_sdk", "e_moderation_sdk"]
+      "extra_link_libraries": []
     }
   }
 }

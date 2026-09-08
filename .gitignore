@@ -1,1 +1,5 @@
+build/
+result
+generated_code/
+.lock*
 /target
