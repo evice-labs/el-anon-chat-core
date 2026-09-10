@@ -34,6 +34,8 @@ public:
     std::string prepareRegistration(const std::string& username, uint64_t kSssThreshold, const std::string& nodePubkeysJson);
     std::string registerUsername(const std::string& username);
     std::string lookupUsername(const std::string& commitmentHex);
+    bool hasActiveIdentity();
+    std::string getSchnorrPublicKey();
 
     // --- Room Operations ---
     std::string createRoom(const std::string& adminCommitmentHex, uint64_t nThreshold, uint64_t mTotal, const std::string& moderatorPubkeysJson, uint64_t creationIndex, uint64_t minMembersForMaturity);
@@ -41,6 +43,7 @@ public:
     std::string leaveRoom(const std::string& roomIdHex, const std::string& memberCommitmentHex);
     int64_t getRoomMemberCount(const std::string& roomIdHex);
     bool isRoomMember(const std::string& roomIdHex, const std::string& memberCommitmentHex);
+    std::string signRoomConsent(const std::string& roomIdHex);
 
     // --- Messaging (Two-Tier SSS) ---
     std::string preparePost(const std::string& message, const std::string& postSaltHex, const std::string& moderatorPubkeysJson, int64_t nThreshold);
