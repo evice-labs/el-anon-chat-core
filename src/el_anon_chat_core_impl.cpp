@@ -69,6 +69,10 @@ std::string ElAnonChatCoreImpl::createIdentity(const std::string& nskHex)
         ffi_registration_free(m_registration);
         m_registration = nullptr;
     }
+    if (m_member) {
+        ffi_member_free(m_member);
+        m_member = nullptr;
+    }
 
     if (nskHex.empty()) {
         m_registration = ffi_registration_new();
@@ -103,14 +107,45 @@ std::string ElAnonChatCoreImpl::getCommitment()
     return bytesToHex(comm, 32);
 }
 
+bool ElAnonChatCoreImpl::hasActiveIdentity()
+{
+    return m_registration != nullptr;
+}
+
+std::string ElAnonChatCoreImpl::getSchnorrPublicKey()
+{
+    if (!m_registration) return "";
+    uint8_t nsk[32];
+    ffi_registration_nsk(m_registration, nsk);
+    FfiModeratorClient* tempClient = ffi_moderator_new(nsk);
+    if (!tempClient) return "";
+    uint8_t pub[32];
+    ffi_moderator_public_key(tempClient, pub);
+    ffi_moderator_free(tempClient);
+    return bytesToHex(pub, 32);
+}
+
 std::string ElAnonChatCoreImpl::prepareRegistration(const std::string& username,
                                                     uint64_t kSssThreshold,
                                                     const std::string& nodePubkeysJson)
 {
-    if (!m_registration) return makeErrorJson("identity not initialized");
+    if (!m_registration) return makeErrorJson("identity not initialized — generate or restore identity first");
+    if (username.empty()) return makeErrorJson("username cannot be empty");
+
+    uint8_t comm[32];
+    ffi_registration_commitment(m_registration, comm);
+    if (m_blacklist && ffi_blacklist_is_revoked(m_blacklist, comm) == 1) {
+        return makeErrorJson("identity has been revoked — cannot prepare registration");
+    }
 
     try {
         json j = json::parse(nodePubkeysJson);
+        if (!j.is_array()) return makeErrorJson("node pubkeys must be a JSON array");
+        if (j.empty()) return makeErrorJson("at least one node pubkey is required");
+        if (kSssThreshold == 0 || kSssThreshold > j.size()) {
+            return makeErrorJson("invalid threshold: must be between 1 and total nodes");
+        }
+
         std::vector<uint8_t> flatPubkeys;
         for (const auto& item : j) {
             std::string keyHex = item.get<std::string>();
@@ -139,10 +174,16 @@ std::string ElAnonChatCoreImpl::prepareRegistration(const std::string& username,
 
 std::string ElAnonChatCoreImpl::registerUsername(const std::string& username)
 {
-    if (!m_usernameRegistry || !m_registration) return makeErrorJson("registry or identity not ready");
+    if (!m_registration) return makeErrorJson("identity not initialized — generate or restore identity first");
+    if (!m_usernameRegistry) return makeErrorJson("username registry not initialized");
+    if (username.empty()) return makeErrorJson("username cannot be empty");
 
     uint8_t comm[32];
     ffi_registration_commitment(m_registration, comm);
+
+    if (m_blacklist && ffi_blacklist_is_revoked(m_blacklist, comm) == 1) {
+        return makeErrorJson("identity has been revoked — cannot register username");
+    }
 
     char* res = ffi_username_registry_register(
         m_usernameRegistry,
@@ -180,19 +221,49 @@ std::string ElAnonChatCoreImpl::createRoom(const std::string& adminCommitmentHex
                                            uint64_t creationIndex,
                                            uint64_t minMembersForMaturity)
 {
+    if (!m_registration) {
+        return makeErrorJson("identity not initialized — generate or restore identity first");
+    }
+
+    uint8_t localComm[32];
+    ffi_registration_commitment(m_registration, localComm);
+    std::string localCommHex = bytesToHex(localComm, 32);
+
+    std::string effectiveAdminHex = adminCommitmentHex.empty() ? localCommHex : adminCommitmentHex;
+    if (effectiveAdminHex != localCommHex) {
+        return makeErrorJson("admin commitment does not match active identity");
+    }
+
+    std::vector<uint8_t> adminComm = hexToBytes(effectiveAdminHex);
+    if (adminComm.size() != 32) {
+        return makeErrorJson("admin commitment must be 32 bytes");
+    }
+
+    if (m_blacklist && ffi_blacklist_is_revoked(m_blacklist, adminComm.data()) == 1) {
+        return makeErrorJson("identity has been revoked — cannot create room");
+    }
+
     if (!m_roomRegistry) return makeErrorJson("room registry not initialized");
+
+    if (nThreshold == 0 || mTotal == 0) {
+        return makeErrorJson("threshold and total moderators must be greater than zero");
+    }
+    if (nThreshold > mTotal) {
+        return makeErrorJson("threshold (N) cannot exceed total moderators (M)");
+    }
 
     try {
         json j = json::parse(moderatorPubkeysJson);
+        if (!j.is_array()) return makeErrorJson("moderator pubkeys must be a JSON array");
+        if (j.size() != mTotal) return makeErrorJson("moderator pubkeys count must match mTotal");
+
         std::vector<uint8_t> flatPubkeys;
         for (const auto& item : j) {
+            if (!item.is_string()) return makeErrorJson("moderator pubkey must be a hex string");
             std::vector<uint8_t> keyBytes = hexToBytes(item.get<std::string>());
             if (keyBytes.size() != 32) return makeErrorJson("each moderator pubkey must be 32 bytes");
             flatPubkeys.insert(flatPubkeys.end(), keyBytes.begin(), keyBytes.end());
         }
-
-        std::vector<uint8_t> adminComm = hexToBytes(adminCommitmentHex);
-        if (adminComm.size() != 32) return makeErrorJson("admin commitment must be 32 bytes");
 
         char* res = ffi_room_registry_create_room(
             m_roomRegistry,
@@ -213,20 +284,100 @@ std::string ElAnonChatCoreImpl::createRoom(const std::string& adminCommitmentHex
     }
 }
 
+std::string ElAnonChatCoreImpl::signRoomConsent(const std::string& roomIdHex)
+{
+    if (!m_registration) return makeErrorJson("identity not initialized — generate or restore identity first");
+
+    std::vector<uint8_t> roomId = hexToBytes(roomIdHex);
+    if (roomId.size() != 32) return makeErrorJson("room ID must be 32 bytes");
+
+    uint8_t comm[32];
+    ffi_registration_commitment(m_registration, comm);
+    uint8_t nsk[32];
+    ffi_registration_nsk(m_registration, nsk);
+
+    char* res = ffi_room_sign_join_consent(roomId.data(), comm, nsk);
+    if (!res) return makeErrorJson("failed to sign join consent");
+    std::string out(res);
+    ffi_identity_free_string(res);
+    return out;
+}
+
 std::string ElAnonChatCoreImpl::joinRoom(const std::string& roomIdHex,
                                          const std::string& memberCommitmentHex,
                                          const std::string& memberPubkeyHex,
                                          const std::string& consentSignatureHex,
                                          uint64_t joinIndex)
 {
-    if (!m_roomRegistry) return makeErrorJson("room registry not initialized");
-    std::vector<uint8_t> roomId = hexToBytes(roomIdHex);
-    std::vector<uint8_t> comm = hexToBytes(memberCommitmentHex);
-    std::vector<uint8_t> pubkey = hexToBytes(memberPubkeyHex);
-    std::vector<uint8_t> sigBytes = hexToBytes(consentSignatureHex);
+    if (!m_registration) return makeErrorJson("identity not initialized — generate or restore identity first");
 
-    if (roomId.size() != 32 || comm.size() != 32 || pubkey.size() != 32 || sigBytes.size() != 64) {
-        return makeErrorJson("invalid parameter lengths (room_id:32, comm:32, pubkey:32, sig:64)");
+    uint8_t localComm[32];
+    ffi_registration_commitment(m_registration, localComm);
+    std::string localCommHex = bytesToHex(localComm, 32);
+
+    std::string effectiveCommHex = memberCommitmentHex.empty() ? localCommHex : memberCommitmentHex;
+    if (effectiveCommHex != localCommHex) {
+        return makeErrorJson("member commitment does not match active identity");
+    }
+
+    std::vector<uint8_t> comm = hexToBytes(effectiveCommHex);
+    if (comm.size() != 32) return makeErrorJson("member commitment must be 32 bytes");
+
+    if (m_blacklist && ffi_blacklist_is_revoked(m_blacklist, comm.data()) == 1) {
+        return makeErrorJson("identity has been revoked — cannot join room");
+    }
+
+    if (!m_roomRegistry) return makeErrorJson("room registry not initialized");
+
+    std::vector<uint8_t> roomId = hexToBytes(roomIdHex);
+    if (roomId.size() != 32) return makeErrorJson("room ID must be 32 bytes");
+
+    uint8_t nsk[32];
+    ffi_registration_nsk(m_registration, nsk);
+
+    std::vector<uint8_t> pubkey;
+    if (memberPubkeyHex.empty() || memberPubkeyHex == memberCommitmentHex) {
+        FfiModeratorClient* tempClient = ffi_moderator_new(nsk);
+        if (tempClient) {
+            uint8_t derivedPub[32];
+            ffi_moderator_public_key(tempClient, derivedPub);
+            ffi_moderator_free(tempClient);
+            pubkey.assign(derivedPub, derivedPub + 32);
+        } else {
+            pubkey = hexToBytes(memberPubkeyHex);
+        }
+    } else {
+        pubkey = hexToBytes(memberPubkeyHex);
+    }
+
+    if (pubkey.size() != 32) return makeErrorJson("member pubkey must be 32 bytes");
+
+    std::vector<uint8_t> sigBytes = hexToBytes(consentSignatureHex);
+    bool isPlaceholderSig = (sigBytes.size() != 64);
+    if (!isPlaceholderSig) {
+        bool allZero = true;
+        for (uint8_t b : sigBytes) {
+            if (b != 0) { allZero = false; break; }
+        }
+        if (allZero) isPlaceholderSig = true;
+    }
+
+    if (isPlaceholderSig) {
+        char* signRes = ffi_room_sign_join_consent(roomId.data(), comm.data(), nsk);
+        if (signRes) {
+            try {
+                json sj = json::parse(signRes);
+                if (sj.contains("ok") && sj["ok"].contains("signature")) {
+                    std::string autoSigHex = sj["ok"]["signature"].get<std::string>();
+                    sigBytes = hexToBytes(autoSigHex);
+                }
+            } catch (...) {}
+            ffi_identity_free_string(signRes);
+        }
+    }
+
+    if (sigBytes.size() != 64) {
+        return makeErrorJson("consent signature must be 64 bytes");
     }
 
     char* res = ffi_room_registry_join_room(
@@ -246,9 +397,22 @@ std::string ElAnonChatCoreImpl::joinRoom(const std::string& roomIdHex,
 
 std::string ElAnonChatCoreImpl::leaveRoom(const std::string& roomIdHex, const std::string& memberCommitmentHex)
 {
+    if (!m_registration) return makeErrorJson("identity not initialized — generate or restore identity first");
+
+    uint8_t localComm[32];
+    ffi_registration_commitment(m_registration, localComm);
+    std::string localCommHex = bytesToHex(localComm, 32);
+
+    std::string effectiveCommHex = memberCommitmentHex.empty() ? localCommHex : memberCommitmentHex;
+    if (effectiveCommHex != localCommHex) {
+        return makeErrorJson("member commitment does not match active identity");
+    }
+
     if (!m_roomRegistry) return makeErrorJson("room registry not initialized");
     std::vector<uint8_t> roomId = hexToBytes(roomIdHex);
-    std::vector<uint8_t> comm = hexToBytes(memberCommitmentHex);
+    if (roomId.size() != 32) return makeErrorJson("room ID must be 32 bytes");
+    std::vector<uint8_t> comm = hexToBytes(effectiveCommHex);
+    if (comm.size() != 32) return makeErrorJson("member commitment must be 32 bytes");
 
     char* res = ffi_room_registry_leave_room(
         m_roomRegistry,
@@ -266,6 +430,7 @@ int64_t ElAnonChatCoreImpl::getRoomMemberCount(const std::string& roomIdHex)
 {
     if (!m_roomRegistry) return 0;
     std::vector<uint8_t> roomId = hexToBytes(roomIdHex);
+    if (roomId.size() != 32) return 0;
     return static_cast<int64_t>(ffi_room_registry_active_member_count(m_roomRegistry, roomId.data()));
 }
 
@@ -274,6 +439,7 @@ bool ElAnonChatCoreImpl::isRoomMember(const std::string& roomIdHex, const std::s
     if (!m_roomRegistry) return false;
     std::vector<uint8_t> roomId = hexToBytes(roomIdHex);
     std::vector<uint8_t> comm = hexToBytes(memberCommitmentHex);
+    if (roomId.size() != 32 || comm.size() != 32) return false;
     return ffi_room_registry_has_active_membership(m_roomRegistry, roomId.data(), comm.data()) == 1;
 }
 
@@ -286,7 +452,18 @@ std::string ElAnonChatCoreImpl::preparePost(const std::string& message,
                                             const std::string& moderatorPubkeysJson,
                                             int64_t nThreshold)
 {
-    if (!m_registration) return makeErrorJson("identity not initialized");
+    if (!m_registration) return makeErrorJson("identity not initialized — generate or restore identity first");
+
+    uint8_t comm[32];
+    ffi_registration_commitment(m_registration, comm);
+
+    if (m_blacklist && ffi_blacklist_is_revoked(m_blacklist, comm) == 1) {
+        return makeErrorJson("identity has been revoked — cannot post messages");
+    }
+
+    if (message.empty()) {
+        return makeErrorJson("message cannot be empty");
+    }
 
     uint8_t nsk[32];
     ffi_registration_nsk(m_registration, nsk);
@@ -294,12 +471,21 @@ std::string ElAnonChatCoreImpl::preparePost(const std::string& message,
     if (!m_member) {
         m_member = ffi_member_new(nsk, 3); // default k_strikes = 3
     }
+    if (!m_member) {
+        return makeErrorJson("failed to initialize member client");
+    }
 
     std::vector<uint8_t> salt = hexToBytes(postSaltHex);
     if (salt.size() != 32) return makeErrorJson("post salt must be 32 bytes");
 
     try {
         json j = json::parse(moderatorPubkeysJson);
+        if (!j.is_array()) return makeErrorJson("moderator pubkeys must be a JSON array");
+        if (j.empty()) return makeErrorJson("at least one moderator pubkey is required");
+        if (nThreshold <= 0 || static_cast<size_t>(nThreshold) > j.size()) {
+            return makeErrorJson("invalid threshold: must be between 1 and total moderators");
+        }
+
         std::vector<uint8_t> flatKeys;
         for (const auto& val : j) {
             std::vector<uint8_t> key = hexToBytes(val.get<std::string>());
@@ -447,6 +633,7 @@ bool ElAnonChatCoreImpl::isRevoked(const std::string& commitmentHex)
 {
     if (!m_blacklist) return false;
     std::vector<uint8_t> comm = hexToBytes(commitmentHex);
+    if (comm.size() != 32) return false;
     return ffi_blacklist_is_revoked(m_blacklist, comm.data()) == 1;
 }
 
@@ -454,6 +641,7 @@ std::string ElAnonChatCoreImpl::revokeCommitment(const std::string& commitmentHe
 {
     if (!m_blacklist) return makeErrorJson("blacklist not initialized");
     std::vector<uint8_t> comm = hexToBytes(commitmentHex);
+    if (comm.size() != 32) return makeErrorJson("commitment must be 32 bytes");
     char* res = ffi_blacklist_revoke(m_blacklist, comm.data());
     if (!res) return makeErrorJson("failed to revoke commitment");
     std::string out(res);
