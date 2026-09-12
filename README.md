@@ -1,10 +1,12 @@
-# el-anon-chat-core
+# eCloakCore
 
-**Anonymous Chat Core C++ Qt Plugin** for **Logos Basecamp**, bridging the **E-Identity Stack** (`e_identity_sdk` and `e_moderation_sdk`) to the Basecamp QML frontend via C-ABI FFI.
+*Built by Evice Labs*
+
+**eCloak Core C++ Qt Plugin Engine** for **Logos Basecamp**, bridging the **E-Identity Stack** (`e_identity_sdk` and `e_moderation_sdk`) to the Basecamp QML frontend via C-ABI FFI.
 
 ## Architectural Overview
 
-`el-anon-chat-core` implements the `PluginInterface` and exposes `AnonChatInterface` to Basecamp, providing native cryptographic capabilities:
+`el-anon-chat-core` () implements the `PluginInterface` and exposes `AnonChatInterface` to Basecamp, providing native cryptographic capabilities:
 
 1. **Identity Management**:
    - Random and deterministic Nullifier Secret Key (NSK) derivation.
@@ -34,7 +36,8 @@
 ## Directory Structure
 
 ```
-el-anon-chat-core/
+eCloakCore/
+├── LICENSE                 # Business Source License 1.1 (BSL 1.1)
 ├── CMakeLists.txt          # CMake plugin build script (logos_module)
 ├── metadata.json           # Basecamp core module manifest
 ├── flake.nix               # Nix packaging definition
@@ -56,3 +59,20 @@ Using Nix with Logos Module Builder:
 ```bash
 nix build .#
 ```
+
+
+## License
+
+This project is licensed under the **Business Source License 1.1 (BSL 1.1)**.
+
+- **Free for non-commercial use**, evaluation, personal privacy, academic research, and public security audits.
+- **Commercial deployment or SaaS hosting** requires a commercial license agreement from **Evice Labs**.
+- Effective **September 12, 2029**, this work converts automatically to the **Apache License, Version 2.0**.
+
+See the full [LICENSE](LICENSE) file for terms and conditions.
+
+---
+
+<p align="center">
+  Copyright &copy; 2026 <strong>Evice Labs</strong>. All rights reserved.
+</p>
