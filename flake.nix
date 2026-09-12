@@ -1,5 +1,5 @@
 {
-  description = "Anon Chat Core — C++ Qt plugin wrapping e_identity_sdk and e_moderation_sdk via FFI";
+  description = "eCloak Core — C++ Qt plugin wrapping e_identity_sdk and e_moderation_sdk via FFI by Evice Labs";
 
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
